@@ -1,12 +1,11 @@
-# Tinkoff bank ATM's cash availability monitor
-Simple script for cash availability monitoring in ATM's of Tinkoff bank 
-with sound alerts
+# Tinkoff bank ATM's cash monitoring
+Simple script for cash availability monitoring in ATM's of Tinkoff bank via official [API](https://api.tinkoff.ru/geo/withdraw/clusters)
 
-Check out `.env.example` for detailed parameters explanation
+Check out `config.py` for detailed parameters explanation
 
 # Startup
 ```bash
-$ cp .env.example .env
 $ pip3 install -r requirements.txt
 $ python3 main.py
 ```
+Requires Python 3.9 or higher!
