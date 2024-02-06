@@ -140,14 +140,12 @@ def save_report(atms: list, city: str):
         index_count = len(items_list)
         address = str(items_list[index_count - 2]) + str(items_list[index_count - 1])
         where = atm.location[:-(len(address) + 2)]
-        result1 = where, address
-        place, address = result1
-        result = BASE_URL_TCS.format(lat=atm.lat, long=atm.long), BASE_URL_GMAPS.format(lat=atm.lat,
-                                                                                        long=atm.long), BASE_URL_YMAPS.format(
-            lat=atm.lat, long=atm.long)
-        tcs_link, gmaps_link, ymaps_link = result
+        place, address = where, address
+        tcs_link, gmaps_link, ymaps_link = (BASE_URL_TCS.format(lat=atm.lat, long=atm.long),
+                                            BASE_URL_GMAPS.format(lat=atm.lat, long=atm.long),
+                                            BASE_URL_YMAPS.format(lat=atm.lat, long=atm.long))
         cur.execute(f"SELECT * FROM atms WHERE atm_id = '{atm.id}'")
-        if not len(cur.fetchall()) > 0:
+        if len(cur.fetchall()) <= 0:
             query = "INSERT INTO atms VALUES (null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             cur.execute(query, (
                 atm.id, city, place, address, atm.lat, atm.long, usd_amount, tcs_link, gmaps_link,
