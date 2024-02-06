@@ -1,19 +1,49 @@
-#!/usr/bin/python3.9
-
-
-"""
-Main file
-
-Forked from https://github.com/frosthamster/tf_cash_monitor/
-"""
-
-
+import os
+import sqlite3
 import time
-import requests
 import urllib.request
+
 from typing import NamedTuple
-import utilities as utils
+
+import requests
+
 import config
+
+BASE_URL_TCS = "https://www.tinkoff.ru/maps/atm/?latitude={lat}&longitude={long}&zoom=20"
+BASE_URL_GMAPS = "https://www.google.com/maps/search/?api=1&query={lat}%2C{long}"
+BASE_URL_YMAPS = "https://yandex.ru/maps/?mode=search&text={lat}%2C+{long}"
+BASE_TINKOFF_API = "https://api.tinkoff.ru/geo/withdraw/clusters"
+
+query_table_atms = """CREATE TABLE IF NOT EXISTS atms(
+            id INTEGER PRIMARY KEY,
+            atm_id INTEGER,
+            city TEXT,
+            place TEXT,
+            address TEXT,
+            latitude TEXT,
+            longitude TEXT,
+            usd_amount INT,
+            tcs_link TEXT,
+            gmaps_link TEXT,
+            ymaps_link TEXT);
+        """
+
+db = os.path.join(os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__))), config.DB_NAME)
+if os.path.isfile(db):
+    print("Database already exists, rename or remove and re-run this script.")
+else:
+    conn = sqlite3.connect(db, check_same_thread=False)
+    cur = conn.cursor()
+    cur.execute(query_table_atms)
+    print("Database successfully created.")
+    conn.commit()
+    conn.close()
+    print("Finished.")
+
+# Initialization
+db = os.path.join(os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__))), config.DB_NAME)
+conn = sqlite3.connect(db, check_same_thread=False)
+cur = conn.cursor()
 
 
 class AvailableCash(NamedTuple):
@@ -31,26 +61,11 @@ class ATM(NamedTuple):
 
 def get_atms_info(city) -> list[dict]:
     if city == "Нижний Новгород":
-        # print("Найдены данные для ", city)
         curr_city_bottom_left_lat = config.NN_QUERY_BOTTOM_LEFT_LAT
         curr_city_bottom_left_long = config.NN_QUERY_BOTTOM_LEFT_LNG
         curr_city_top_right_lat = config.NN_QUERY_TOP_RIGHT_LAT
         curr_city_top_right_long = config.NN_QUERY_TOP_RIGHT_LNG
         curr_city_zoom = config.NN_QUERY_ZOOM
-    elif city == "Санкт-Петербург":
-        # print("Найдены данные для ", city)
-        curr_city_bottom_left_lat = config.SPB_QUERY_BOTTOM_LEFT_LAT
-        curr_city_bottom_left_long = config.SPB_QUERY_BOTTOM_LEFT_LNG
-        curr_city_top_right_lat = config.SPB_QUERY_TOP_RIGHT_LAT
-        curr_city_top_right_long = config.SPB_QUERY_TOP_RIGHT_LNG
-        curr_city_zoom = config.SPB_QUERY_ZOOM
-    elif city == "Москва и МО":
-        # print("Найдены данные для ", city)
-        curr_city_bottom_left_lat = config.MSK_QUERY_BOTTOM_LEFT_LAT
-        curr_city_bottom_left_long = config.MSK_QUERY_BOTTOM_LEFT_LNG
-        curr_city_top_right_lat = config.MSK_QUERY_TOP_RIGHT_LAT
-        curr_city_top_right_long = config.MSK_QUERY_TOP_RIGHT_LNG
-        curr_city_zoom = config.MSK_QUERY_ZOOM
     else:
         print("В конфиге нет данных для города", city)
         return []
@@ -64,7 +79,7 @@ def get_atms_info(city) -> list[dict]:
                     'topRight': {'lat': curr_city_top_right_lat, 'lng': curr_city_top_right_long},
                 },
                 'filters': {
-                    'showUnavailable': True,
+                    'showUnavailable': False,
                     'currencies': [currency],
                 },
                 'zoom': curr_city_zoom,
@@ -83,9 +98,9 @@ def get_suitable_atms(city) -> list[ATM]:
     atms_info = get_atms_info(city)
     for atm_info in atms_info:
         if (
-            (atm_id := atm_info['id']) in config.CASH_MONITOR_SKIP_ATMS_IDS
-            or atm_info['pointType'] != 'ATM'
-            or atm_info['brand']['name'].lower() != 'тинькофф банк'
+                (atm_id := atm_info['id']) in config.CASH_MONITOR_SKIP_ATMS_IDS
+                or atm_info['pointType'] != 'ATM'
+                or atm_info['brand']['name'].lower() != 'тинькофф банк'
         ):
             continue
 
@@ -99,8 +114,8 @@ def get_suitable_atms(city) -> list[ATM]:
         }
 
         if any(
-            (avail_curr := curr_amounts.get(curr_name)) and avail_curr.amount >= expected_amount
-            for curr_name, expected_amount in config.CURRENCY_FILTERS_AMOUNT.items()
+                (avail_curr := curr_amounts.get(curr_name)) and avail_curr.amount >= expected_amount
+                for curr_name, expected_amount in config.CURRENCY_FILTERS_AMOUNT.items()
         ):
             location = atm_info['location']
             result.append(ATM(
@@ -114,42 +129,52 @@ def get_suitable_atms(city) -> list[ATM]:
     return result
 
 
-# def save_report(atms: list[ATM], city) -> str:
-def save_report(atms: list[ATM], city):
+def save_report(atms: list, city: str):
     for atm in atms:
-        usd_amount = 0
-        eur_amount = 0
-        rub_amount = 0
+        amount = 0
         for currency in atm.available_cash:
             if currency.currency == "USD":
-                usd_amount = currency.amount
-            if currency.currency == "EUR":
-                eur_amount = currency.amount
-            if currency.currency == "RUB":
-                rub_amount = currency.amount
-        utils.save_atm_info(atm.id, city, atm.location, atm.lat, atm.long, usd_amount, eur_amount, rub_amount)
+                amount = currency.amount
+        usd_amount = amount
+        items_list = atm.location.split(",")
+        index_count = len(items_list)
+        address = str(items_list[index_count - 2]) + str(items_list[index_count - 1])
+        where = atm.location[:-(len(address) + 2)]
+        result1 = where, address
+        place, address = result1
+        result = BASE_URL_TCS.format(lat=atm.lat, long=atm.long), BASE_URL_GMAPS.format(lat=atm.lat,
+                                                                                        long=atm.long), BASE_URL_YMAPS.format(
+            lat=atm.lat, long=atm.long)
+        tcs_link, gmaps_link, ymaps_link = result
+        cur.execute(f"SELECT * FROM atms WHERE atm_id = '{atm.id}'")
+        if not len(cur.fetchall()) > 0:
+            query = "INSERT INTO atms VALUES (null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            cur.execute(query, (
+                atm.id, city, place, address, atm.lat, atm.long, usd_amount, tcs_link, gmaps_link,
+                ymaps_link))
+        else:
+            cur.execute(f"UPDATE atms SET usd_amount = '{usd_amount}' WHERE atm_id = '{atm.id}'")
+            conn.commit()
 
 
 def try_find_cash():
-    print("Checking status")
-    if urllib.request.urlopen("https://api.tinkoff.ru/geo/withdraw/clusters").getcode() == 200:
-        print("Status OK:", urllib.request.urlopen("https://api.tinkoff.ru/geo/withdraw/clusters").getcode())
-    else:
-        print("Status:", urllib.request.urlopen("https://api.tinkoff.ru/geo/withdraw/clusters").getcode(), "!")
-    print("\33[33mПоиск банкоматов...\x1b[0m")
-    for city in config.CITIES:
-        suitable_atms = get_suitable_atms(city)
-        if not suitable_atms:
-            print("\33[31mНе найдено\x1b[0m в банкоматов", city)
-        else:
-            print("\33[32mЕсть результаты\x1b[0m для", city, "-", len(suitable_atms))
-            save_report(suitable_atms, city)
+    is_api_ok = urllib.request.urlopen(BASE_TINKOFF_API).getcode() == 200
+
+    if not is_api_ok:
+        print("API is unreachable")
+        return
+
+    city = config.CITY
+    suitable_atms = get_suitable_atms(city)
+    if suitable_atms:
+        save_report(suitable_atms, city)
 
 
 def main():
     while True:
         try:
             try:
+                print("Polling ATMs")
                 try_find_cash()
             except Exception as e:
                 print(e)
